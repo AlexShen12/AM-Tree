@@ -33,4 +33,4 @@ def find_visual_cuts(video_path, threshold=27.0):
         video_manager.release()
 
 # Usage
-find_visual_cuts("/users/a/l/alshen/VideoTree/VideoTree/data/VideoMME/data/_CqKv0Y1FB0.mp4")
+find_visual_cuts("/users/a/l/alshen/VideoTree/VideoTree/data/VideoMME/data/_8lBR0E_Tx8.mp4")
