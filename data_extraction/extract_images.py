@@ -15,8 +15,8 @@ def save_json(data, fn, indent=4):
 
 
 def extract_es():
-    input_base_path = Path('/path/to/egoschema/videos')
-    output_base_path = Path('/path/to/data/egoschema_frames)')
+    input_base_path = Path('/users/a/l/alshen/VideoTree/VideoTree/good_clips_git')
+    output_base_path = Path('/users/a/l/alshen/VideoTree/VideoTree/data/egoschema_frames')
     fps = 1
     pbar = tqdm(total=len(list(input_base_path.iterdir())))
     for video_fp in input_base_path.iterdir():

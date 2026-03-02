@@ -64,13 +64,13 @@ def clip_es():
     trust_remote_code=True).to('cuda').eval()
     resume = True
 
-    base_path = Path('path/to/data/egoschema_frames')
-    save_folder = '/path/to/egoschema/frame_features'
+    base_path = Path('/users/a/l/alshen/VideoTree/VideoTree/data/egoschema_frames')
+    save_folder = '/users/a/l/alshen/VideoTree/VideoTree/data/egoschema_feature'
     all_data = []
 
-    with open('./data/subset_answers.json', 'r') as file:
-        json_data = json.load(file)    
-    subset_names_list = list(json_data.keys())
+    # with open('./data/subset_answers.json', 'r') as file:
+    #     json_data = json.load(file)    
+    # subset_names_list = list(json_data.keys())
 
     example_path_list = list(base_path.iterdir())
 
@@ -82,8 +82,8 @@ def clip_es():
     for example_path in example_path_list:
 
         # for subset videos, comment out for fullset
-        if example_path.name not in subset_names_list:
-            continue
+        # if example_path.name not in subset_names_list:
+        #     continue
         # else:
         #     print("example_path in subset")
 
