@@ -65,13 +65,80 @@ def update_pred_response(text):
 
 def update_relevance_response(text):
     response = text
-    # print("response",response)
-
     relevance_match = re.search(r"frame relevance: \[([0-9, ]+)\]", response)
     if relevance_match:
-        # Convert the matched string to a list of integers
-       relevance = list(map(int, relevance_match.group(1).split(',')))
+        relevance = list(map(int, relevance_match.group(1).split(',')))
     return relevance
+
+
+def parse_vmme_frame_relevance(text) -> list:
+    """
+    Safely extract per-frame relevance scores from a vmme_frame_rel LLM response.
+    Expected format: "frame relevance: [1, 3, 2, ...]"
+    Returns a list of ints, or an empty list if parsing fails.
+    """
+    if text is None:
+        return []
+    match = re.search(r"frame relevance:\s*\[([0-9,\s]+)\]", text, re.IGNORECASE)
+    if match:
+        return list(map(int, match.group(1).split(",")))
+    return []
+
+
+def parse_av_relevance(text) -> list:
+    """
+    Extract per-clip relevance scores from an av_rel LLM response.
+    Expected format: "clip relevance: [1, 3, 2, ...]"
+    Returns a list of ints, or an empty list if parsing fails.
+    """
+    if text is None:
+        return []
+    match = re.search(r"clip relevance:\s*\[([0-9,\s]+)\]", text, re.IGNORECASE)
+    if match:
+        return list(map(int, match.group(1).split(',')))
+    return []
+
+
+def parse_av_relevance_single(text) -> int:
+    """
+    Extract a single relevance score (1, 2, or 3) from an av_rel_single or
+    vmme_frame_rel_single response.
+    Expected format: "relevance: 2", "clip relevance: 2", or "frame relevance: 2"
+    Returns 1 on parse failure.
+    """
+    if text is None:
+        return 1
+    match = re.search(r"(?:(?:clip|frame)\s+)?relevance:\s*([123])", text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    # fallback: look for a standalone digit 1/2/3
+    match = re.search(r"\b([123])\b", text)
+    if match:
+        return int(match.group(1))
+    return 1
+
+
+def parse_av_weights(text) -> tuple:
+    """
+    Extract LLM-suggested modality weights from an av_rel response.
+    Expected format (two separate lines):
+        visual_weight: <float>
+        audio_weight:  <float>
+
+    Each weight is clamped to [0.1, 0.9] to prevent degenerate single-modality
+    collapse, then the pair is renormalised to sum to 1.0.
+    Falls back to (0.5, 0.5) on any parse failure.
+    """
+    if text is None:
+        return 0.5, 0.5
+    vis_match = re.search(r"visual_weight:\s*([0-9.]+)", text, re.IGNORECASE)
+    aud_match = re.search(r"audio_weight:\s*([0-9.]+)", text, re.IGNORECASE)
+    if vis_match and aud_match:
+        w_v = max(0.1, min(0.9, float(vis_match.group(1))))
+        w_a = max(0.1, min(0.9, float(aud_match.group(1))))
+        total = w_v + w_a
+        return w_v / total, w_a / total
+    return 0.5, 0.5
 
 class PromptTemplate(object):
     def __init__(self, head, template, post_process_fn):
@@ -267,6 +334,278 @@ class PromptFactory(object):
                 Template(B_INST + B_SYS + "Please provide a single-letter answer (A, B, C, D, E) to the following multiple-choice question, and your answer must be one of the letters (A, B, C, D, or E). You must not provide any other response or explanation. You are given some language descriptions of a first person view video. The video is $duration seconds long. Each sentence describes a ${clip_length}s clip. The descriptions are sequential and non-overlapping which cover the whole video exactly." + E_SYS + 'Here are the descriptions:\n$narration\n Here is the question: $question.\n Here are the choices:\n (A): $optionA\n (B): $optionB\n (C): $optionC\n (D): $optionD\n (E): $optionE\n' + E_INST + anchor),
             ],
             post_process_fn = first_char_after_anchor(anchor)
+        )
+
+        # audio-visual breadth expansion — relevance scoring + modality weight suggestion
+        prompt_templates['av_rel'] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. You are given visual and audio descriptions "
+                "of key representative clips selected from a video. "
+                "Your tasks are: "
+                "(1) Score the relevance of each clip to the question on a scale of 1-3 "
+                "(1=low relevance, 2=medium relevance, 3=high relevance). "
+                "(2) Suggest updated modality weights (visual_weight and audio_weight, "
+                "both positive, summing to 1.0) that would better guide re-clustering "
+                "if more clips are needed. "
+                "Prefer a higher visual_weight when the question is primarily about "
+                "visual events; prefer a higher audio_weight when the question depends "
+                "on speech or sound. "
+                "Respond in exactly this format:\n"
+                "clip relevance: [s1, s2, ..., sN]\n"
+                "visual_weight: <float>\n"
+                "audio_weight: <float>"
+            ),
+            template=[
+                Template(
+                    "Video question: $question\n"
+                    "Options: A: $optionA  B: $optionB  C: $optionC  D: $optionD  E: $optionE\n\n"
+                    "The following $num_clips representative clips have been selected "
+                    "in temporal order:\n"
+                    "$clip_descriptions\n\n"
+                    "Score the relevance of each clip and suggest modality weights for re-clustering."
+                )
+            ],
+            post_process_fn=parse_av_relevance,
+        )
+
+        # audio-visual breadth expansion: per-clip relevance scoring + modality weight suggestion
+        prompt_templates['av_rel'] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "For each representative clip you are given two pieces of information:\n"
+                "  - Scene description: a grounded account of the visual content "
+                "(setting, subjects, actions, key objects or on-screen text).\n"
+                "  - Audio transcript: verbatim dialogue in quotation marks and "
+                "bracketed non-speech sounds (e.g. [music], [crowd noise]).\n\n"
+                "Your tasks are:\n"
+                "(1) Score the relevance of each clip to the question on a scale of 1-3 "
+                "(1=low, 2=medium, 3=high). Use both the scene description and the "
+                "transcript to judge relevance — a clip is highly relevant if its "
+                "visual content or spoken dialogue directly helps answer the question.\n"
+                "(2) Suggest updated modality weights (visual_weight and audio_weight, "
+                "both positive, summing to 1.0) to guide re-clustering if more clips "
+                "are needed. Increase visual_weight when the question hinges on what "
+                "is seen; increase audio_weight when it hinges on what is said or heard.\n\n"
+                "Respond in exactly this format:\n"
+                "clip relevance: [s1, s2, ..., sN]\n"
+                "visual_weight: <float>\n"
+                "audio_weight: <float>"
+            ),
+            template=[
+                Template(
+                    "Video question: $question\n"
+                    "Options: A: $optionA  B: $optionB  C: $optionC  D: $optionD  E: $optionE\n\n"
+                    "The following $num_clips representative clips have been selected "
+                    "in temporal order:\n"
+                    "$clip_descriptions\n\n"
+                    "Score the relevance of each clip and suggest modality weights for re-clustering."
+                )
+            ],
+            post_process_fn=parse_av_relevance,
+        )
+
+        # single-clip relevance (one score per call)
+        prompt_templates["av_rel_single"] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "You are given one representative clip from a video with its scene description "
+                "and audio transcript. "
+                "Score how relevant this clip is to answering the question on a scale of 1-3: "
+                "1=low relevance, 2=medium relevance, 3=high relevance. "
+                "A clip is highly relevant if its visual content or spoken dialogue directly "
+                "helps answer the question.\n\n"
+                "Respond with a single line: relevance: <1, 2, or 3>"
+            ),
+            template=[
+                Template(
+                    "Video question: $question\n"
+                    "Options: A: $optionA  B: $optionB  C: $optionC  D: $optionD  E: $optionE\n\n"
+                    "Clip (index $clip_idx):\n"
+                    "  Scene description: $scene_desc\n"
+                    "  Audio transcript:  $audio_desc\n\n"
+                    "Score the relevance of this clip (1, 2, or 3):"
+                )
+            ],
+            post_process_fn=parse_av_relevance_single,
+        )
+
+        # modality weights only (used when reclustering after individual clip scores)
+        prompt_templates["av_rel_weights"] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "You are given representative clips from a video with their relevance scores. "
+                "Suggest modality weights (visual_weight and audio_weight, both positive, "
+                "summing to 1.0) to guide re-clustering for better clip selection. "
+                "Increase visual_weight when the question hinges on what is seen; "
+                "increase audio_weight when it hinges on what is said or heard.\n\n"
+                "Respond in exactly this format:\n"
+                "visual_weight: <float>\n"
+                "audio_weight: <float>"
+            ),
+            template=[
+                Template(
+                    "Video question: $question\n"
+                    "Options: A: $optionA  B: $optionB  C: $optionC  D: $optionD  E: $optionE\n\n"
+                    "Clips with relevance scores:\n"
+                    "$clip_descriptions_with_scores\n\n"
+                    "Suggest modality weights for re-clustering."
+                )
+            ],
+            post_process_fn=parse_av_weights,
+        )
+
+        # AV depth expansion — final QA answer from scene descriptions + audio transcripts
+        prompt_templates["av_qa"] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "You are given scene descriptions and audio transcripts of key representative clips "
+                "from a video, produced by vision and audio models. "
+                "Answer the multiple-choice question by selecting the single best option (A, B, C, or D). "
+                "Base your answer on both the visual evidence in the scene descriptions and the spoken/sound "
+                "evidence in the transcripts. If uncertain, choose the most plausible option."
+            ),
+            template=[
+                Template(
+                    "Clip descriptions (in temporal order):\n$clip_descriptions\n\n"
+                    "Question: $question\n"
+                    "A: $optionA\n"
+                    "B: $optionB\n"
+                    "C: $optionC\n"
+                    "D: $optionD\n\n"
+                    "Your response must contain exactly one letter: A, B, C, or D. "
+                    "Do not include any explanation, punctuation, or other text. Output only the single letter."
+                )
+            ],
+            post_process_fn=first_char_as_answer,
+        )
+
+        # VideoMME AV QA — clip descriptions (visual + audio) from Qwen2-VL and Qwen2-Audio
+        prompt_templates["vmme_av_qa"] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "You are given scene descriptions and audio transcripts of key representative clips "
+                "from a video, produced by vision and audio models. "
+                "Answer the multiple-choice question by selecting the single best option (A, B, C, or D). "
+                "Base your answer on both the visual evidence in the scene descriptions and the spoken/sound "
+                "evidence in the transcripts. If uncertain, choose the most plausible option."
+            ),
+            template=[
+                Template(
+                    "Clip descriptions (in temporal order):\n$clip_descriptions\n\n"
+                    "Question: $question\n"
+                    "A: $optionA\n"
+                    "B: $optionB\n"
+                    "C: $optionC\n"
+                    "D: $optionD\n\n"
+                    "Your response must contain exactly one letter: A, B, C, or D. "
+                    "Do not include any explanation, punctuation, or other text. Output only the single letter."
+                )
+            ],
+            post_process_fn=first_char_as_answer,
+        )
+
+        # VideoMME frame-based breadth expansion — relevance scoring via LLaVA captions
+        # Uses 4 options (A-D); no optionE. Expects $frame_descriptions built by
+        # format_frame_descriptions() in adaptive_breath_expansion_videomme.py.
+        prompt_templates["vmme_frame_rel"] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "You are given descriptions of key representative frames selected from a video. "
+                "Each description was generated by a vision-language model from the raw frame image "
+                "and covers the scene setting, main subjects, actions, and notable objects or on-screen text.\n\n"
+                "Your task: score the relevance of each frame to the question on a scale of 1-3 "
+                "(1=low relevance, 2=medium relevance, 3=high relevance). "
+                "A frame is highly relevant if its visual content directly provides evidence "
+                "needed to answer the question.\n\n"
+                "Respond in exactly this format:\n"
+                "frame relevance: [s1, s2, ..., sN]"
+            ),
+            template=[
+                Template(
+                    "Video question: $question\n"
+                    "Options: A: $optionA  B: $optionB  C: $optionC  D: $optionD\n\n"
+                    "The following $num_frames representative frames were selected "
+                    "in temporal order:\n"
+                    "$frame_descriptions\n\n"
+                    "Score the relevance of each frame (format: 'frame relevance: [s1, s2, ..., sN]'):"
+                )
+            ],
+            post_process_fn=parse_vmme_frame_relevance,
+        )
+
+        # VideoMME single-frame relevance (one score per call, for individual scoring)
+        prompt_templates["vmme_frame_rel_single"] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "You are given one representative frame from a video with its scene description. "
+                "Score how relevant this frame is to answering the question on a scale of 1-3: "
+                "1=low relevance, 2=medium relevance, 3=high relevance. "
+                "A frame is highly relevant if its visual content directly provides evidence "
+                "needed to answer the question.\n\n"
+                "Respond with a single line: relevance: <1, 2, or 3>"
+            ),
+            template=[
+                Template(
+                    "Video question: $question\n"
+                    "Options: A: $optionA  B: $optionB  C: $optionC  D: $optionD\n\n"
+                    "Frame (index $frame_idx):\n  $frame_desc\n\n"
+                    "Score the relevance of this frame (1, 2, or 3):"
+                )
+            ],
+            post_process_fn=parse_av_relevance_single,
+        )
+
+        # VideoMME final answer prediction — fed the LLaVA captions of the highest-relevance
+        # frames after the adaptive expansion loop terminates.
+        prompt_templates["vmme_qa"] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "You are given descriptions of the most relevant frames from a video, "
+                "each generated by a vision-language model. "
+                "Answer the multiple-choice question by selecting the single best option (A, B, C, or D). "
+                "Base your answer only on the visual evidence in the frame descriptions. "
+                "If uncertain, choose the most plausible option. "
+                "CRITICAL: You MUST output exactly one letter—nothing else. No reasoning, no explanation, "
+                "no punctuation, no 'Answer:' or 'The answer is' prefix. Output ONLY A, B, C, or D."
+            ),
+            template=[
+                Template(
+                    "Frame descriptions (in temporal order):\n$frame_descriptions\n\n"
+                    "Question: $question\n"
+                    "A: $optionA\n"
+                    "B: $optionB\n"
+                    "C: $optionC\n"
+                    "D: $optionD\n\n"
+                    "Output exactly one letter (A, B, C, or D). Do not include any reasoning, explanation, "
+                    "or other text. Your entire response must be a single letter."
+                )
+            ],
+            post_process_fn=first_char_as_answer,
+        )
+
+        # VideoMME AV QA — fed clip descriptions (visual + audio) from Qwen2-VL and Qwen2-Audio.
+        prompt_templates["vmme_av_qa"] = PromptTemplate(
+            head=(
+                "You are an expert video-question analyst. "
+                "You are given scene descriptions and audio transcripts of key representative clips "
+                "from a video, produced by vision and audio models. "
+                "Answer the multiple-choice question by selecting the single best option (A, B, C, or D). "
+                "Base your answer on both the visual evidence in the scene descriptions and the spoken/sound "
+                "evidence in the transcripts. If uncertain, choose the most plausible option."
+            ),
+            template=[
+                Template(
+                    "Clip descriptions (in temporal order):\n$clip_descriptions\n\n"
+                    "Question: $question\n"
+                    "A: $optionA\n"
+                    "B: $optionB\n"
+                    "C: $optionC\n"
+                    "D: $optionD\n\n"
+                    "Your response must contain exactly one letter: A, B, C, or D. "
+                    "Do not include any explanation, punctuation, or other text. Output only the single letter."
+                )
+            ],
+            post_process_fn=first_char_as_answer,
         )
 
         return prompt_templates

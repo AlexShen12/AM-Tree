@@ -1,10 +1,10 @@
+import time
 import openai
 from openai import OpenAI
 from transformers import AutoTokenizer
 import torch
 import transformers
 from prompts import identity
-import pdb
 from pprint import pprint
 
 
@@ -30,39 +30,33 @@ class Model(object):
 
 
 class GPT(Model):
-    def __init__(self, model_name, temperature):
+    def __init__(self, api_key, model_name, temperature):
         super().__init__()
+        # Passing None lets the SDK fall back to the OPENAI_API_KEY environment
+        # variable automatically, so the key never needs to be in any script.
+        self.client = OpenAI(api_key=api_key or None)
         self.model_name = model_name
         self.temperature = temperature
-
         self.badrequest_count = 0
-        # self.client = OpenAI(api_key=api_key)
+
     def get_response(self, **kwargs):
         try:
-            res = openai.chat.completions.create(**kwargs)
-
-            return res
-        except openai.APIConnectionError as e:
+            return self.client.chat.completions.create(**kwargs)
+        except openai.APIConnectionError:
             print('APIConnectionError')
             time.sleep(30)
             return self.get_response(**kwargs)
-        except openai.APIConnectionError as err:
-            print('APIConnectionError')
-            time.sleep(30)
-            return self.get_response(**kwargs)
-        except openai.RateLimitError as e:
+        except openai.RateLimitError:
             print('RateLimitError')
             time.sleep(10)
             return self.get_response(**kwargs)
-        except openai.APITimeoutError as e:
+        except openai.APITimeoutError:
             print('APITimeoutError')
             time.sleep(30)
             return self.get_response(**kwargs)
-        except openai.BadRequestError as e:
-            print('BadRequestError')
+        except openai.BadRequestError:
             self.badrequest_count += 1
-            print('badrequest_count', self.badrequest_count)
-
+            print(f'BadRequestError (count: {self.badrequest_count})')
             return None
 
     def forward(self, head, prompts):

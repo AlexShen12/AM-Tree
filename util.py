@@ -1,9 +1,15 @@
+import os
 import pickle
 import json
 from pathlib import Path
 import argparse
 import pandas as pd
 from pprint import pprint
+from dotenv import load_dotenv
+
+# Load .env from the repo root (the directory containing this file).
+# Variables already set in the environment take precedence (override=False).
+load_dotenv(Path(__file__).parent / ".env")
 
 
 def load_pkl(fn):
@@ -34,9 +40,9 @@ def parse_args():
     parser.add_argument("--dataset", default='egoschema', type=str)  # 'egoschema', 'nextqa', 'nextgqa', 'intentqa'
 
     # subset
-    parser.add_argument("--data_path", default='path/data/egoschema/lavila_subset.json', type=str) 
-    parser.add_argument("--anno_path", default='path/data/egoschema/subset_anno.json', type=str)
-    parser.add_argument("--duration_path", default='path/data/egoschema/duration.json', type=str) 
+    parser.add_argument("--data_path", default='', type=str)
+    parser.add_argument("--anno_path", default='', type=str)
+    parser.add_argument("--duration_path", default='', type=str) 
 
     # # fullset  
     # parser.add_argument("--data_path", default='/data/path/lavila_fullset.json', type=str) 
@@ -59,7 +65,35 @@ def parse_args():
     parser.add_argument("--iter_threshold", default=4, type=int)
 
     #frame feature path
-    parser.add_argument("--frame_feat_path", default="", type=str)  
+    parser.add_argument("--frame_feat_path", default="", type=str)
+
+    # audio-visual expansion paths and models
+    parser.add_argument("--clip_feat_path", default="", type=str,
+                        help="Root of VideoMME_clip_feature/ containing per-video audio/ and visual/ subdirs")
+    parser.add_argument("--clip_media_path", default="", type=str,
+                        help="Root directory of raw clip .mp4 segments for Qwen2-VL/Audio inference")
+    parser.add_argument("--qwen_vl_model", default="Qwen/Qwen2-VL-7B-Instruct", type=str)
+    parser.add_argument("--qwen_audio_model", default="Qwen/Qwen2-Audio-7B-Instruct", type=str)
+    parser.add_argument("--init_visual_weight", default=0.5, type=float,
+                        help="Initial fusion weight for visual embeddings (audio weight = 1 - this)")
+    parser.add_argument("--init_audio_weight", default=0.5, type=float,
+                        help="Initial fusion weight for audio embeddings")
+
+    # VideoMME frame-based pipeline paths and models
+    parser.add_argument("--frames_path", default="", type=str,
+                        help="Root of VideoMME_frames/ containing per-video JPEG frame subdirectories")
+    parser.add_argument("--llava_model", default="llava-hf/llava-onevision-qwen2-7b-ov-hf", type=str,
+                        help="HuggingFace model ID for LLaVA-OneVision frame captioner")
+
+    # depth expansion (AV pipeline and VideoMME frame-based)
+    parser.add_argument("--breadth_path", default="", type=str,
+                        help="Path to breadth_expansion.json for depth expansion input")
+    parser.add_argument("--width_res_path", default="", type=str,
+                        help="Path to width_res.json; if empty, inferred as same dir as breadth_path")
+    parser.add_argument("--num_subclusters", default=3, type=int,
+                        help="Number of sub-clusters for relevance=2 clusters")
+    parser.add_argument("--num_subsubclusters", default=3, type=int,
+                        help="Number of sub-sub-clusters for relevance=3 clusters")
 
     # output
     parser.add_argument("--output_base_path", default="", type=str)  
@@ -70,7 +104,8 @@ def parse_args():
 
     # prompting
     parser.add_argument("--model", default="gpt-4-1106-preview", type=str)
-    parser.add_argument("--api_key", default="", type=str)
+    # Falls back to the OPENAI_API_KEY environment variable if not passed explicitly.
+    parser.add_argument("--api_key", default=os.environ.get("OPENAI_API_KEY", ""), type=str)
     parser.add_argument("--temperature", default=0.0, type=float)
     parser.add_argument("--prompt_type", default="qa_standard", type=str)
     parser.add_argument("--task", default="qa", type=str)  # sum, qa, gqa
