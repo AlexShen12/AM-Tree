@@ -69,7 +69,48 @@ pip install --editable .
 ```
 
 ## Future plans
-Due to the limit of time, we are still updating the codebase. We will also incorporate the scipts/captions for NeXT-QA and IntentQA in the future. 
+Due to the limit of time, we are still updating the codebase. We will also incorporate the scipts/captions for NeXT-QA and IntentQA in the future.
+
+
+## VideoMME AV Pipeline
+
+**Before you begin:** Install the VideoMME dataset (annotations, clips, etc.) into the base directory of this repository, and ensure kmeans_pytorch is set up as shown in the **Update Kmeans-pytorch** section above.
+
+
+### Environment setup
+
+From the project root:
+
+```bash
+bash scripts/setup_av_env.sh
+```
+
+This creates `venv_av` (or set `VENV_DIR` to override), installs torch (CUDA 11.8), `requirements_av.txt`, and downloads Qwen2-VL and Qwen2-Audio. Or manually:
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install -r requirements_av.txt
+python install_qwen.py
+```
+
+Add `OPENAI_API_KEY` to `.env` before running breadth or QA stages.
+
+### Running
+
+Activate the environment (`source venv_av/bin/activate` or `source videetree_env/bin/activate` if using existing venv). With defaults from `util.py`:
+
+```bash
+# 1. Breadth expansion
+python adaptive_breath_expansion_av.py --dataset videomme --output_base_path output/videomme_av_breath --output_filename breadth_expansion.json --prompt_type av_rel --disable_eval
+
+# 2. Depth expansion
+python depth_expansion_av.py --breadth_path output/videomme_av_breath/breadth_expansion.json --output_base_path output/videomme_av_depth --output_filename depth_expansion_res.json
+
+# 3. QA evaluation
+python main_qa_av.py --dataset videomme --tree_node_idx output/videomme_av_depth/depth_expansion_res_by_quid.json --output_base_path output/videomme_av_qa --output_filename qa_results.json --prompt_type vmme_av_qa
+```
+
+Override paths via `--anno_path`, `--clip_feat_path`, `--clip_media_path`, etc.
 
 
 ## Experiments

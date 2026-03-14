@@ -41,7 +41,7 @@ def parse_args():
 
     # subset
     parser.add_argument("--data_path", default='', type=str)
-    parser.add_argument("--anno_path", default='', type=str)
+    parser.add_argument("--anno_path", default='VideoMME/videomme/test-00000-of-00001.parquet', type=str)
     parser.add_argument("--duration_path", default='', type=str) 
 
     # # fullset  
@@ -68,9 +68,9 @@ def parse_args():
     parser.add_argument("--frame_feat_path", default="", type=str)
 
     # audio-visual expansion paths and models
-    parser.add_argument("--clip_feat_path", default="", type=str,
+    parser.add_argument("--clip_feat_path", default="data/VideoMME_clip_feature", type=str,
                         help="Root of VideoMME_clip_feature/ containing per-video audio/ and visual/ subdirs")
-    parser.add_argument("--clip_media_path", default="", type=str,
+    parser.add_argument("--clip_media_path", default="data/VideoMME_clips", type=str,
                         help="Root directory of raw clip .mp4 segments for Qwen2-VL/Audio inference")
     parser.add_argument("--qwen_vl_model", default="Qwen/Qwen2-VL-7B-Instruct", type=str)
     parser.add_argument("--qwen_audio_model", default="Qwen/Qwen2-Audio-7B-Instruct", type=str)
@@ -86,13 +86,13 @@ def parse_args():
                         help="HuggingFace model ID for LLaVA-OneVision frame captioner")
 
     # depth expansion (AV pipeline and VideoMME frame-based)
-    parser.add_argument("--breadth_path", default="", type=str,
+    parser.add_argument("--breadth_path", default="output/videomme_av_breath/breadth_expansion.json", type=str,
                         help="Path to breadth_expansion.json for depth expansion input")
     parser.add_argument("--width_res_path", default="", type=str,
                         help="Path to width_res.json; if empty, inferred as same dir as breadth_path")
-    parser.add_argument("--num_subclusters", default=3, type=int,
+    parser.add_argument("--num_subclusters", default=4, type=int,
                         help="Number of sub-clusters for relevance=2 clusters")
-    parser.add_argument("--num_subsubclusters", default=3, type=int,
+    parser.add_argument("--num_subsubclusters", default=4, type=int,
                         help="Number of sub-sub-clusters for relevance=3 clusters")
 
     # output
@@ -103,7 +103,7 @@ def parse_args():
     parser.add_argument("--tree_node_idx", default="", type=str)  
 
     # prompting
-    parser.add_argument("--model", default="gpt-4-1106-preview", type=str)
+    parser.add_argument("--model", default="gpt-4.1-mini", type=str)
     # Falls back to the OPENAI_API_KEY environment variable if not passed explicitly.
     parser.add_argument("--api_key", default=os.environ.get("OPENAI_API_KEY", ""), type=str)
     parser.add_argument("--temperature", default=0.0, type=float)

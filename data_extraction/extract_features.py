@@ -56,57 +56,51 @@ processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-large-patch14")
 
 
 def clip_es():
-    device = "cuda" if torch.cuda.is_available() else "cpu" 
-
     model = AutoModel.from_pretrained(
-    model_name_or_path, 
-    torch_dtype=torch.float16,
-    trust_remote_code=True).to('cuda').eval()
-    resume = True
+        model_name_or_path,
+        torch_dtype=torch.float16,
+        trust_remote_code=True).to('cuda').eval()
 
-    base_path = Path('/users/a/l/alshen/VideoTree/VideoTree/data/egoschema_frames')
-    save_folder = '/users/a/l/alshen/VideoTree/VideoTree/data/egoschema_feature'
-    all_data = []
+    base_path = Path('/users/a/l/alshen/VideoTree/VideoTree/data/VideoMME_frames')
+    save_folder = '/users/a/l/alshen/VideoTree/VideoTree/data/VideoMME_feature'
 
-    # with open('./data/subset_answers.json', 'r') as file:
-    #     json_data = json.load(file)    
-    # subset_names_list = list(json_data.keys())
+    example_path_list = sorted(p for p in base_path.iterdir() if p.is_dir())
 
-    example_path_list = list(base_path.iterdir())
+    already_done = {Path(f).stem for f in os.listdir(save_folder) if f.endswith('.pt')}
+    pending = [p for p in example_path_list if p.name not in already_done]
+    print(f"Resuming: {len(already_done)} already done, {len(pending)} remaining.")
 
-    pbar = tqdm(total=len(example_path_list))
+    pbar = tqdm(total=len(pending))
 
-    i = 0 
-    max = 50
-
-    for example_path in example_path_list:
-
-        # for subset videos, comment out for fullset
-        # if example_path.name not in subset_names_list:
-        #     continue
-        # else:
-        #     print("example_path in subset")
-
+    for example_path in pending:
         image_paths = list(example_path.iterdir())
         image_paths.sort(key=lambda x: int(x.stem))
         img_feature_list = []
         for image_path in image_paths:
-            image = Image.open(str(image_path))
+            try:
+                image = Image.open(str(image_path))
+                image.verify()
+                image = Image.open(str(image_path))
+            except Exception as e:
+                print(f"Skipping corrupt frame {image_path}: {e}")
+                continue
 
             input_pixels = processor(images=image, return_tensors="pt", padding=True).pixel_values.to('cuda')
 
-            with torch.no_grad(), torch.cuda.amp.autocast():
+            with torch.no_grad(), torch.amp.autocast('cuda'):
                 image_features = model.encode_image(input_pixels)
                 img_feature_list.append(image_features)
+
+        if not img_feature_list:
+            print(f"No valid frames for {example_path.name}, skipping.")
+            pbar.update(1)
+            continue
+
         img_feature_tensor = torch.stack(img_feature_list)
         img_feats = img_feature_tensor.squeeze(1)
 
-        name_ids = example_path.name
-
-
-        save_image_features(img_feats, name_ids, save_folder)
+        save_image_features(img_feats, example_path.name, save_folder)
         pbar.update(1)
-
 
     pbar.close()
 

@@ -1,0 +1,17 @@
+# VideoMME AV pipeline — use with torch 2.1.x + CUDA
+# Install torch first from PyTorch index, e.g.:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+torch>=2.1.0,<2.4.0
+kmeans_pytorch
+transformers==4.46.3
+openai
+pandas
+pyarrow
+python-dotenv
+tqdm
+imageio-ffmpeg
+qwen-vl-utils
+accelerate
+librosa
+numpy
