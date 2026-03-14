@@ -20,10 +20,6 @@ from pprint import pprint
 from av_models import Qwen2VLDescriber, Qwen2AudioDescriber
 
 
-# ---------------------------------------------------------------------------
-# Prompt helpers
-# ---------------------------------------------------------------------------
-
 def format_clip_descriptions(clip_indices: list, visual_descs: list, audio_descs: list) -> str:
     """
     Build the $clip_descriptions block substituted into vmme_av_qa prompt.
@@ -55,7 +51,6 @@ def launch():
     args = parse_args()
     pprint(args)
 
-    # Load tree node indices (depth expansion output)
     tree_node_idx_dict = {}
     if args.tree_node_idx:
         with open(args.tree_node_idx, "r") as f:
@@ -78,7 +73,6 @@ def launch():
     makedir(args.output_base_path)
     output_path = os.path.join(args.output_base_path, args.output_filename)
 
-    # Resume
     processed = {}
     if not args.start_from_scratch and os.path.exists(output_path):
         processed = load_json(output_path)
@@ -94,7 +88,6 @@ def launch():
     model = get_model(args)
     model.set_post_process_fn(prompter.post_process_fn)
 
-    # Load Qwen2-VL and Qwen2-Audio for clip description
     qwen_vl = Qwen2VLDescriber(args.qwen_vl_model)
     qwen_audio = Qwen2AudioDescriber(args.qwen_audio_model)
 
@@ -131,7 +124,6 @@ def launch():
             save_json(processed, output_path)
         pbar.update(1)
 
-    # Incorporate backup prediction
     if len(args.backup_pred_path) > 0:
         backup = load_json(args.backup_pred_path)
         if "data" in backup:
@@ -140,7 +132,6 @@ def launch():
             if processed[quid]["pred"] == -1 and quid in backup:
                 processed[quid]["pred"] = backup[quid]["pred"]
 
-    # Eval
     if not args.disable_eval:
         processed = eval_qa_videomme(processed)
 

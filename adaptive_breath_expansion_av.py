@@ -16,10 +16,6 @@ from model import get_model
 from av_models import Qwen2VLDescriber, Qwen2AudioDescriber
 
 
-# ---------------------------------------------------------------------------
-# Feature loading
-# ---------------------------------------------------------------------------
-
 def load_clip_features(video_id: str, clip_feat_path: str):
     """
     Load per-clip audio and visual embeddings from the VideoMME_clip_feature directory.
@@ -53,10 +49,6 @@ def load_clip_features(video_id: str, clip_feat_path: str):
     audio_feats  = torch.stack([torch.load(f) for f in aud_files])  # [N, 1024]
     return visual_feats, audio_feats
 
-
-# ---------------------------------------------------------------------------
-# Feature fusion
-# ---------------------------------------------------------------------------
 
 def fuse_features(
     visual_feats: torch.Tensor,
@@ -97,10 +89,6 @@ def fuse_features(
     return F.normalize(fused, dim=1)
 
 
-# ---------------------------------------------------------------------------
-# Cluster representative selection  (unchanged from adaptive_breath_expansion)
-# ---------------------------------------------------------------------------
-
 def find_closest_points_per_cluster(x, cluster_ids, cluster_centers):
     """
     For each cluster find the single clip whose fused embedding is closest
@@ -123,10 +111,6 @@ def find_closest_points_per_cluster(x, cluster_ids, cluster_centers):
 
     return closest_per_cluster
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def build_clip_path(clip_media_path: str, video_id: str, clip_idx: int) -> str:
     """
@@ -157,31 +141,23 @@ def format_clip_descriptions(
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 def launch():
     args = parse_args()
-    # Print args with the API key redacted so it never appears in slurm logs.
     printable = vars(args).copy()
     if printable.get("api_key"):
         printable["api_key"] = "***"
     pprint(printable)
 
-    # output
     makedir(args.output_base_path)
     output_path           = os.path.join(args.output_base_path, args.output_filename)
     output_width_res_path = os.path.join(args.output_base_path, "width_res.json")
 
-    # resume from a previous run
     processed = {}
     if not args.start_from_scratch and os.path.exists(output_path):
         processed = load_json(output_path)
         if "data" in processed:
             processed = processed["data"]
 
-    # dataset
     quids_to_exclude = set(processed.keys())
     dataset = get_dataset(
         args,
@@ -189,12 +165,10 @@ def launch():
         num_examples_to_run=args.num_examples_to_run,
     )
 
-    # prompt + LLM
     prompter = PromptFactory().get(args.prompt_type)
     model = get_model(args)
     model.set_post_process_fn(prompter.post_process_fn)
 
-    # audio-visual describers — loaded once and shared across all videos
     qwen_vl    = Qwen2VLDescriber(args.qwen_vl_model)    if args.qwen_vl_model    else None
     qwen_audio = Qwen2AudioDescriber(args.qwen_audio_model) if args.qwen_audio_model else None
 
@@ -203,12 +177,9 @@ def launch():
     pbar = tqdm(total=len(dataset))
     for i, item in enumerate(dataset):
         ukey_name = "quid" if "quid" in item else "uid"
-        ukey_1    = item[ukey_name]   # unique key per item (question-level for VideoMME/NExT)
-        video_id  = item["uid"]       # raw video ID used for feature/media file lookups;
-                                      # for VideoMME this is the YouTube ID matching the
-                                      # clip_feat_path directory name (e.g. '-3t1rj8g6yg')
+        ukey_1    = item[ukey_name]
+        video_id  = item["uid"]
 
-        # per-video cluster / fusion state
         tree_node       = [0]
         cluster_num     = args.init_cluster_num
         max_cluster_num = args.max_cluster_num
@@ -220,11 +191,9 @@ def launch():
         clip_length       = int(1 / args.fps) if args.fps < 1 else 1 / args.fps
         few_shot_examples = build_fewshot_examples(args.fewshot_example_path, args.data_path)
 
-        # load all per-clip features for this video (CPU tensors, [N, 1024] each)
         visual_feats, audio_feats = load_clip_features(video_id, args.clip_feat_path)
         n_clips = visual_feats.size(0)
 
-        # track descriptions for the final accepted tree_node
         vis_descs: list = []
         aud_descs: list = []
         pred        = None
@@ -232,17 +201,9 @@ def launch():
         prompt      = None
         clip_relevance: list = []
 
-        # ------------------------------------------------------------------
-        # Adaptive audio-visual width expansion loop
-        # ------------------------------------------------------------------
         while True:
-            # Cap cluster count to the number of available clips
             actual_cluster_num = min(cluster_num, n_clips)
-
-            # 1. Fuse modalities under current weights → unit-sphere embeddings
             fused_feats = fuse_features(visual_feats, audio_feats, w_v, w_a).to("cuda")
-
-            # 2. Cosine K-means on fused embeddings
             cluster_ids_x, cluster_centers = kmeans(
                 X=fused_feats,
                 num_clusters=actual_cluster_num,
@@ -252,7 +213,6 @@ def launch():
             cluster_ids_x   = cluster_ids_x.to("cuda")
             cluster_centers = cluster_centers.to("cuda")
 
-            # 3. Select the clip closest to each centroid; sort temporally
             closest_per_cluster = find_closest_points_per_cluster(
                 fused_feats, cluster_ids_x, cluster_centers
             )
@@ -263,8 +223,6 @@ def launch():
             )
 
             cluster_ids_x = cluster_ids_x.tolist()
-
-            # 4. Generate visual + audio descriptions for representative clips only
             vis_descs = []
             aud_descs = []
             for clip_idx in tree_node:
@@ -277,8 +235,6 @@ def launch():
                 )
 
             clip_descriptions_str = format_clip_descriptions(tree_node, vis_descs, aud_descs)
-
-            # 5. Build prompt and call the LLM for relevance scores + weight suggestions
             prompt = prompter.fill(
                 **item,
                 fps=args.fps,
@@ -293,24 +249,19 @@ def launch():
 
             clip_relevance = pred if isinstance(pred, list) else []
             high_relevance_count = clip_relevance.count(3)
-
-            # 6. Stopping condition
             if high_relevance_count < iter_threshold:
                 if cluster_num < max_cluster_num:
                     cluster_num = int(cluster_num * adaptive_rate)
                     w_v, w_a = parse_av_weights(info["response"])
                     continue
                 else:
-                    break  # cluster cap reached
+                    break
             else:
-                break  # sufficient high-relevance clips found
+                break
 
-        # ------------------------------------------------------------------
-        # Record results for this video
-        # ------------------------------------------------------------------
         all_width_res.append({
-            "name":                ukey_1,    # question-level key (quid or uid)
-            "video_id":            video_id,  # raw video ID used for feature lookups
+            "name":                ukey_1,
+            "video_id":            video_id,
             "tree_node":           tree_node,
             "cluster_ids_x":      cluster_ids_x,
             "final_visual_weight": w_v,

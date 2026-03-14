@@ -31,9 +31,6 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
 PROJECT_ROOT  = Path(__file__).resolve().parents[1]
 IMAGEBIND_DIR = PROJECT_ROOT / "data_extraction" / "ImageBind"
 CLIPS_DIR     = PROJECT_ROOT / "data" / "VideoMME_clips"
@@ -47,9 +44,6 @@ from imagebind import data as ib_data                              # noqa: E402
 from imagebind.models import imagebind_model                       # noqa: E402
 from imagebind.models.imagebind_model import ModalityType          # noqa: E402
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -58,9 +52,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Model loading
-# ---------------------------------------------------------------------------
 
 def load_model(device: torch.device) -> torch.nn.Module:
     """
@@ -85,9 +76,6 @@ def load_model(device: torch.device) -> torch.nn.Module:
     return model
 
 
-# ---------------------------------------------------------------------------
-# Audio extraction
-# ---------------------------------------------------------------------------
 
 # A valid 16 kHz 16-bit mono WAV for even 0.1 s of audio is ~3.2 KB.
 # Anything smaller is either an empty file or just the 44-byte WAV header
@@ -137,9 +125,6 @@ def extract_audio_to_wav(clip_path: Path, wav_path: Path) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# Per-clip encoding
-# ---------------------------------------------------------------------------
 
 @torch.no_grad()
 def encode_clip(
@@ -194,9 +179,6 @@ def encode_clip(
     return visual_emb, audio_emb
 
 
-# ---------------------------------------------------------------------------
-# Per-video processing
-# ---------------------------------------------------------------------------
 
 def process_video(
     video_dir: Path,
@@ -247,9 +229,6 @@ def process_video(
         torch.save(visual_emb, str(visual_out))  # sentinel — written last
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     device = torch.device(

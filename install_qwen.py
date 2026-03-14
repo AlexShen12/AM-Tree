@@ -18,24 +18,14 @@ import sys
 import importlib
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Load .env FIRST — before any huggingface_hub import — so that HF_HOME and
-# HF_HUB_DISABLE_XET are in the environment when the library initialises.
-# dotenv's load_dotenv never overwrites variables already set in the shell.
-# ---------------------------------------------------------------------------
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
-# Ensure the HF cache directory exists on /work (quota-free).
-# HF_HOME is set via .env; create the directory if this is the first run.
 hf_home = os.environ.get("HF_HOME")
 if hf_home:
     os.makedirs(hf_home, exist_ok=True)
     print(f"HuggingFace cache → {hf_home}")
 
-# ---------------------------------------------------------------------------
-# Version pin — edit here if you upgrade torch
-# ---------------------------------------------------------------------------
 TRANSFORMERS_PIN = "transformers==4.46.3"
 
 
@@ -57,16 +47,11 @@ def check_torch() -> str:
 
 def install_packages() -> None:
     print("\n=== Installing / pinning packages ===")
-    # Downgrade from the incompatible 4.57.6 to the torch-2.1.x-compatible pin
     pip_install(TRANSFORMERS_PIN)
-    # qwen_vl_utils provides process_vision_info needed by Qwen2VLDescriber
     pip_install("qwen-vl-utils")
-    # librosa decodes audio from .mp4 clips for Qwen2AudioDescriber
     pip_install("librosa")
-    # pyarrow is required by pandas to read the VideoMME .parquet annotation file
     pip_install("pyarrow")
 
-    # Confirm the version that landed
     import importlib.metadata
     installed = importlib.metadata.version("transformers")
     print(f"  transformers {installed} active")
@@ -74,7 +59,6 @@ def install_packages() -> None:
 
 def download_qwen_vl() -> None:
     print("\n=== Downloading Qwen2-VL-7B-Instruct (~15 GB) ===")
-    # Import only after the correct transformers version is installed
     from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
     import torch
 
@@ -110,7 +94,6 @@ def main() -> None:
 
     torch_ver = check_torch()
 
-    # Guard: warn if torch is unexpectedly new and the pin might not be needed
     major, minor = (int(x) for x in torch_ver.split(".")[:2])
     if (major, minor) >= (2, 4):
         print(

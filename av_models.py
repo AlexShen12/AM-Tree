@@ -6,8 +6,6 @@ import imageio_ffmpeg
 from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from transformers import Qwen2AudioForConditionalGeneration
 
-# Resolve the imageio-ffmpeg binary once at import time.  This binary is
-# bundled with moviepy/imageio-ffmpeg so it works without system ffmpeg in PATH.
 _FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 try:
@@ -15,8 +13,6 @@ try:
 except ImportError:
     process_vision_info = None
 
-# Qwen2-VL: produce a structured scene description, not a narrative summary.
-# GPT needs concrete grounding — who, what, where — not impressionistic language.
 _VISUAL_PROMPT = (
     "Describe this video clip as a scene. Cover: "
     "(1) the setting and environment (indoors/outdoors, location type, time of day if visible); "
@@ -25,9 +21,6 @@ _VISUAL_PROMPT = (
     "Be specific and concrete. Do not speculate beyond what is visible."
 )
 
-# Qwen2-Audio: produce a verbatim transcript plus a sound inventory.
-# A paraphrase ("someone is talking about X") loses the exact content GPT needs
-# to answer questions. Verbatim dialogue is far more informative for relevance scoring.
 _AUDIO_PROMPT = (
     "Transcribe this audio clip accurately. "
     "Write out any spoken dialogue or narration verbatim inside quotation marks; "
@@ -94,7 +87,6 @@ class Qwen2VLDescriber:
             with torch.no_grad():
                 generated_ids = self.model.generate(**inputs, max_new_tokens=128)
 
-            # strip the input tokens from each generated sequence
             trimmed = [
                 out[len(inp):]
                 for inp, out in zip(inputs.input_ids, generated_ids)
@@ -134,17 +126,11 @@ class Qwen2AudioDescriber:
             return f"[audio clip not found: {clip_path}]"
 
         try:
-            # Pipe audio directly from ffmpeg to a numpy buffer — single process,
-            # no temp files, no video decoding overhead.
-            # -f f32le: output raw float32 PCM so no int→float conversion is needed.
-            # -ac 1:    downmix to mono before piping.
-            # -ar:      resample to the model's expected sampling rate in one pass.
-            # The imageio-ffmpeg binary is used so system ffmpeg in PATH is not required.
             cmd = [
                 _FFMPEG_EXE,
                 "-loglevel", "error",
                 "-i", clip_path,
-                "-vn",                          # skip video decoding entirely
+                "-vn",
                 "-ar", str(self.sampling_rate),
                 "-ac", "1",
                 "-f", "f32le",
@@ -153,9 +139,6 @@ class Qwen2AudioDescriber:
             result = subprocess.run(cmd, capture_output=True, check=True)
             audio = np.frombuffer(result.stdout, dtype=np.float32)
 
-            # Instruction and audio content both go in the user turn — Qwen2-Audio
-            # resolves the audio_url placeholder against the `audios` list passed
-            # to the processor, so the string value is irrelevant.
             messages = [
                 {
                     "role": "user",
@@ -177,9 +160,6 @@ class Qwen2AudioDescriber:
             ).to(self.model.device)
 
             with torch.no_grad():
-                # 256 tokens: a 30-second clip at normal speech pace is ~75 words
-                # (~100 tokens), so 256 provides headroom for longer clips and
-                # the bracketed sound annotations that follow the transcript.
                 generated_ids = self.model.generate(**inputs, max_new_tokens=256)
 
             trimmed = generated_ids[:, inputs.input_ids.size(1):]

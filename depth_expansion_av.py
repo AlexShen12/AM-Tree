@@ -30,10 +30,6 @@ from adaptive_breath_expansion_av import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Build relevance_scores from breadth output
-# ---------------------------------------------------------------------------
-
 def build_relevance_scores_for_clusters(tree_node, cluster_ids_x, clip_relevance):
     """
     Map clip_relevance (ordered by tree_node) to relevance_scores[cluster_id].
@@ -51,10 +47,6 @@ def build_relevance_scores_for_clusters(tree_node, cluster_ids_x, clip_relevance
             relevance_scores[cluster_id] = clip_relevance[i] if i < len(clip_relevance) else 1
     return relevance_scores
 
-
-# ---------------------------------------------------------------------------
-# Hierarchical clustering (cosine K-means, matching depth_expansion_videomme structure)
-# ---------------------------------------------------------------------------
 
 def hierarchical_clustering_av(
     fused_feats,
@@ -224,10 +216,6 @@ def find_closest_points_in_temporal_order_subsub(x, clusters, relevance_scores):
     closest_indices.sort()
     return closest_indices
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def launch():
     args = parse_args()
