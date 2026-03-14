@@ -1,17 +1,3 @@
-"""
-AV Depth Expansion: Sub-cluster primary clusters by relevance (no GPT, no Qwen).
-
-Consumes breadth_expansion.json from adaptive_breath_expansion_av.py, runs
-cosine K-means sub-clustering on fused clip features based on per-cluster
-relevance scores from the breadth pass:
-
-  - Score 1: no expansion — single representative clip per cluster
-  - Score 2: 1 level deep — num_subclusters subclusters, 1 rep each
-  - Score 3: 2 levels deep — subclusters → sub-subclusters, 1 rep each
-
-Output: depth_expansion_res.json and depth_expansion_res_by_quid.json with
-temporally sorted clip indices for downstream QA (e.g. Qwen captioning + GPT).
-"""
 
 import os
 from pathlib import Path

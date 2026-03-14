@@ -17,20 +17,6 @@ from av_models import Qwen2VLDescriber, Qwen2AudioDescriber
 
 
 def load_clip_features(video_id: str, clip_feat_path: str):
-    """
-    Load per-clip audio and visual embeddings from the VideoMME_clip_feature directory.
-
-    Directory layout expected:
-        {clip_feat_path}/{video_id}/visual/clip_NNN.pt   -> [1024] float32 tensor
-        {clip_feat_path}/{video_id}/audio/clip_NNN.pt    -> [1024] float32 tensor
-
-    Files are loaded in filename-sorted (i.e. temporal) order so that the
-    returned 0-based clip index matches the temporal position in the video.
-
-    Returns:
-        visual_feats: [N_clips, 1024] float32 tensor
-        audio_feats:  [N_clips, 1024] float32 tensor
-    """
     vis_dir = os.path.join(clip_feat_path, video_id, "visual")
     aud_dir = os.path.join(clip_feat_path, video_id, "audio")
 
@@ -56,33 +42,6 @@ def fuse_features(
     w_v: float,
     w_a: float,
 ) -> torch.Tensor:
-    """
-    Fuse visual and audio clip embeddings under adaptive per-modality weights.
-
-    Each modality is L2-normalised before mixing so that magnitude differences
-    between the Qwen2-VL and Qwen2-Audio embedding spaces do not distort the
-    cosine geometry.
-
-    Because both modality vectors are unit-norm, the energy contributed by
-    each to the unnormalised sum scales with the *square* of the mixing
-    coefficient, not the coefficient itself.  Using sqrt(w_v) and sqrt(w_a)
-    as the actual coefficients therefore makes the weights directly
-    interpretable as energy proportions:
-
-        ||sqrt(w_v)·v̂ + sqrt(w_a)·â||²  =  w_v + w_a + 2·sqrt(w_v·w_a)·(v̂·â)
-                                         →  w_v + w_a = 1   (when v̂ ⊥ â)
-
-    Using linear weights instead would give w_v² + w_a², breaking the
-    intuitive mapping from weight to proportion of influence.
-
-    The result is L2-normalised to keep every fused vector on the unit sphere,
-    which is required for cosine-distance K-means to behave consistently
-    across loop iterations.
-
-    Returns:
-        fused: [N_clips, 1024] unit-normalised float32 tensor on the same
-               device as the input tensors.
-    """
     v_norm = F.normalize(visual_feats.float(), dim=1)
     a_norm = F.normalize(audio_feats.float(), dim=1)
     fused  = (w_v ** 0.5) * v_norm + (w_a ** 0.5) * a_norm
@@ -90,13 +49,6 @@ def fuse_features(
 
 
 def find_closest_points_per_cluster(x, cluster_ids, cluster_centers):
-    """
-    For each cluster find the single clip whose fused embedding is closest
-    (L2) to the cluster centroid.
-
-    Returns:
-        dict: cluster_id -> [global_clip_index]
-    """
     closest_per_cluster = {cid: [] for cid in range(len(cluster_centers))}
 
     for cluster_id in range(len(cluster_centers)):
@@ -113,11 +65,6 @@ def find_closest_points_per_cluster(x, cluster_ids, cluster_centers):
 
 
 def build_clip_path(clip_media_path: str, video_id: str, clip_idx: int) -> str:
-    """
-    Map a 0-based clip index to its .mp4 path.
-    Filenames are 1-indexed and zero-padded to three digits, matching the
-    feature file naming convention (clip_001.pt, clip_002.pt, …).
-    """
     return os.path.join(clip_media_path, video_id, f"clip_{clip_idx + 1:03d}.mp4")
 
 
@@ -126,13 +73,6 @@ def format_clip_descriptions(
     vis_descs: list,
     aud_descs: list,
 ) -> str:
-    """
-    Build the $clip_descriptions block substituted into the av_rel prompt.
-
-    Each entry is labelled to match what the two models actually produce:
-    - Scene description (Qwen2-VL): grounded who/what/where account of the visuals.
-    - Transcript (Qwen2-Audio): verbatim dialogue in quotes + bracketed sound labels.
-    """
     lines = []
     for rank, (idx, vis, aud) in enumerate(zip(tree_node, vis_descs, aud_descs), start=1):
         lines.append(f"Clip {rank} (index {idx}):")
